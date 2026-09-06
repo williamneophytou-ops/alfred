@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
-import { supabase, type Memory } from "@/lib/supabase";
+import { getSupabase, type Memory } from "@/lib/supabase";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -32,7 +32,7 @@ const tools: Anthropic.Tool[] = [
 async function executeTool(name: string, input: unknown): Promise<string> {
   if (name === "remember") {
     const { content } = input as { content: string };
-    const { error } = await supabase.from("memories").insert({ content });
+    const { error } = await getSupabase().from("memories").insert({ content });
     if (error) {
       console.error("Failed to save memory:", error);
       return "Failed to save that.";
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { data: memories } = await supabase
+    const { data: memories } = await getSupabase()
       .from("memories")
       .select("content")
       .order("created_at", { ascending: true })
