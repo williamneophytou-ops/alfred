@@ -4,42 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const BG_STORAGE_KEY = "alfred-bg-image";
-
-/** Downscales/re-encodes an image file to a reasonably-sized JPEG data URL,
- * so a full-resolution photo doesn't blow past localStorage's quota. */
-function fileToBackgroundDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("Could not read that image."));
-      img.onload = () => {
-        const maxDim = 1920;
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          const scale = maxDim / Math.max(width, height);
-          width = Math.round(width * scale);
-          height = Math.round(height * scale);
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Canvas not supported."));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", 0.85));
-      };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 type ComponentPayload =
   | {
       type: "task_list";
@@ -107,128 +71,189 @@ const SECTIONS: Section[] = [
   },
 ];
 
-// Shared card / accent styling — kept muted and consistent throughout.
-const CARD = "rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-md";
-// The main shell: frosted, translucent "liquid glass" — a soft tint and
-// heavy blur over whatever's behind it (the custom background image, if
-// set), with a light inner rim to catch highlights like real glass does.
+// Shared card / accent styling — tactical HUD theme: dark panels with thin
+// cyan-glow borders, evoking a Batcomputer-style command console.
+const CARD = "rounded-xl bg-cyan-950/20 border border-cyan-400/20 backdrop-blur-md";
+// The main shell: frosted glass over whatever's behind it (the custom
+// background image, if set), with a cyan inner rim like a HUD panel edge.
 const GLASS_SHELL =
-  "border border-white/20 bg-slate-950/60 backdrop-blur-3xl " +
-  "shadow-[0_8px_32px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)]";
+  "border border-cyan-400/25 bg-slate-950/70 backdrop-blur-3xl " +
+  "shadow-[0_8px_32px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(103,232,249,0.15)]";
 // A glassier, interactive variant for task list items — hover grows it
-// slightly and adds a soft light-blue glow around the edge.
+// slightly and adds a glowing cyan edge, like a HUD element highlighting
+// on focus.
 const TASK_CARD =
-  "rounded-2xl border border-white/10 bg-white/[0.06] backdrop-blur-md transition-all " +
-  "duration-200 ease-out hover:scale-[1.02] hover:border-sky-400/50 " +
-  "hover:shadow-[0_0_20px_2px_rgba(56,189,248,0.35)]";
-const ACCENT = "bg-indigo-600 hover:bg-indigo-500";
+  "rounded-xl border border-cyan-400/20 bg-cyan-950/25 backdrop-blur-md transition-all " +
+  "duration-200 ease-out hover:scale-[1.02] hover:border-cyan-300/60 " +
+  "hover:shadow-[0_0_20px_2px_rgba(34,211,238,0.4)]";
+const ACCENT = "bg-cyan-600 hover:bg-cyan-500";
+// Small uppercase technical label, matching the reference's "SYSTEM
+// OVERVIEW" / "TACTICAL MAP" panel-header style.
+const HUD_LABEL = "text-xs font-semibold uppercase tracking-wider text-cyan-400/80";
+
+function renderSection(id: string, gmailStatus: string | null) {
+  if (id === "chat") return <Chat />;
+  if (id === "memory") return <MemorySection gmailStatus={gmailStatus} />;
+  if (id === "planning") return <DailyPlanningSection />;
+  return <TasksSection />;
+}
+
+function CornerBrackets() {
+  const base = "pointer-events-none absolute h-6 w-6 border-cyan-400/40";
+  return (
+    <>
+      <div className={`${base} left-3 top-3 rounded-tl-md border-l-2 border-t-2`} />
+      <div className={`${base} right-3 top-3 rounded-tr-md border-r-2 border-t-2`} />
+      <div className={`${base} bottom-3 left-3 rounded-bl-md border-b-2 border-l-2`} />
+      <div className={`${base} bottom-3 right-3 rounded-br-md border-b-2 border-r-2`} />
+    </>
+  );
+}
+
+function DashboardWidget({
+  section,
+  onFocus,
+  children,
+}: {
+  section: Section;
+  onFocus: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    // Outer wrapper carries the hover grow + glow — it must NOT have
+    // overflow-hidden, or the glow gets hard-clipped to a rectangle right
+    // at its own edge (a self-inflicted "border" instead of a soft glow).
+    // Clipping the actual content (for the rounded corners) happens on the
+    // inner div instead.
+    <div className="group h-64 rounded-xl transition-all duration-200 ease-out hover:z-10 hover:scale-[1.03] hover:shadow-[0_0_24px_4px_rgba(34,211,238,0.35)]">
+      <div className="flex h-full flex-col overflow-hidden rounded-xl border border-cyan-400/20 bg-black/30 backdrop-blur-md transition-colors duration-200 ease-out group-hover:border-cyan-300/60">
+        <div className="flex items-center justify-between border-b border-cyan-400/10 px-3 py-2">
+          <span className="font-display text-xs font-semibold uppercase tracking-wider text-cyan-300">
+            {section.label}
+          </span>
+          <button
+            onClick={onFocus}
+            className="rounded-full border border-cyan-400/30 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-200 transition-colors hover:bg-cyan-400/10"
+          >
+            Focus
+          </button>
+        </div>
+        <div className="flex flex-1 flex-col overflow-y-auto p-3">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function TimeWidget({ now }: { now: Date | null }) {
+  return (
+    // Same split as DashboardWidget: the glow lives on an outer wrapper
+    // with no overflow-hidden, so it isn't clipped to a hard rectangle.
+    <div className="rounded-xl transition-all duration-200 ease-out hover:scale-[1.03] hover:shadow-[0_0_24px_4px_rgba(34,211,238,0.35)]">
+      <div className="flex flex-col overflow-hidden rounded-xl border border-cyan-400/20 bg-black/30 p-4 text-center backdrop-blur-md transition-colors duration-200 ease-out hover:border-cyan-300/60">
+        <span className={`${HUD_LABEL} mb-2`}>System Clock</span>
+        {now ? (
+          <>
+            <span className="font-display text-3xl tracking-wide text-cyan-300">
+              {now.toLocaleTimeString()}
+            </span>
+            <span className="mt-1 text-xs uppercase tracking-wider text-cyan-100/60">
+              {now.toLocaleDateString(undefined, {
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+              })}
+            </span>
+          </>
+        ) : (
+          <span className="font-display text-3xl text-cyan-300">--:--:--</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function HomeClient() {
-  const [activeSection, setActiveSection] = useState("chat");
+  const [primarySection, setPrimarySection] = useState("chat");
   const [gmailStatus, setGmailStatus] = useState<string | null>(null);
-  const [bgImage, setBgImage] = useState<string | null>(null);
-  const [bgError, setBgError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("gmail");
     if (status) {
       setGmailStatus(status);
-      setActiveSection("memory");
+      setPrimarySection("memory");
       window.history.replaceState({}, "", "/");
     }
   }, []);
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(BG_STORAGE_KEY);
-      if (saved) setBgImage(saved);
-    } catch {
-      // Private browsing / storage disabled — just skip restoring a saved background.
-    }
-  }, []);
-
-  async function handleBackgroundFile(file: File) {
-    setBgError(null);
-    try {
-      const dataUrl = await fileToBackgroundDataUrl(file);
-      setBgImage(dataUrl);
-      try {
-        window.localStorage.setItem(BG_STORAGE_KEY, dataUrl);
-      } catch {
-        setBgError("Background applied, but couldn't be saved for next time (storage full).");
-      }
-    } catch {
-      setBgError("Couldn't use that image. Try a different file.");
-    }
-  }
-
-  function resetBackground() {
-    setBgImage(null);
-    setBgError(null);
-    try {
-      window.localStorage.removeItem(BG_STORAGE_KEY);
-    } catch {
-      // Nothing to clean up if storage was never available.
-    }
-  }
+  const secondarySections = SECTIONS.filter((s) => s.id !== primarySection);
+  const leftSections = secondarySections.slice(0, 1);
+  const rightSections = secondarySections.slice(1);
 
   return (
-    <div
-      className={`flex min-h-screen items-center justify-center bg-cover bg-center p-4 font-sans md:p-8 ${
-        bgImage ? "" : "bg-gradient-to-br from-slate-300 to-slate-500"
-      }`}
-      style={bgImage ? { backgroundImage: `url(${bgImage})` } : undefined}
-    >
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-black p-4 font-sans md:p-8">
       <div
-        className={`flex h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] md:h-[calc(100vh-4rem)] ${GLASS_SHELL}`}
+        className={`relative flex h-[calc(100vh-2rem)] w-full max-w-[1600px] flex-col overflow-hidden rounded-[2rem] md:h-[calc(100vh-4rem)] ${GLASS_SHELL}`}
       >
-        <Header activeSection={activeSection} onSelect={setActiveSection} />
-        <main className="flex flex-1 flex-col overflow-hidden">
-          {activeSection === "chat" ? (
-            <Chat />
-          ) : activeSection === "memory" ? (
-            <MemorySection gmailStatus={gmailStatus} />
-          ) : activeSection === "planning" ? (
-            <DailyPlanningSection />
-          ) : (
-            <TasksSection />
-          )}
-        </main>
-      </div>
+        <CornerBrackets />
+        <Header primarySection={primarySection} onSelect={setPrimarySection} now={now} />
+        <main className="grid flex-1 grid-cols-1 gap-4 overflow-hidden p-4 lg:grid-cols-[260px_1fr_260px]">
+          <div className="flex flex-col gap-3 overflow-y-auto p-6">
+            <TimeWidget now={now} />
+            {leftSections.map((s) => (
+              <DashboardWidget key={s.id} section={s} onFocus={() => setPrimarySection(s.id)}>
+                {renderSection(s.id, gmailStatus)}
+              </DashboardWidget>
+            ))}
+          </div>
 
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-1.5">
-        {bgError && (
-          <p className="max-w-xs rounded-lg bg-red-500/15 px-3 py-1.5 text-xs text-red-300">
-            {bgError}
-          </p>
-        )}
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-slate-800/80 p-1 backdrop-blur-md">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleBackgroundFile(file);
-              e.target.value = "";
-            }}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="rounded-full px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            {bgImage ? "Change background" : "Set background image"}
-          </button>
-          {bgImage && (
-            <button
-              onClick={resetBackground}
-              className="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
-            >
-              Reset
-            </button>
+          <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-cyan-400/25 bg-black/20 backdrop-blur-md">
+            <div className="flex items-center justify-between border-b border-cyan-400/10 px-4 py-2.5">
+              <span className="font-display text-sm font-semibold uppercase tracking-wider text-cyan-300">
+                {SECTIONS.find((s) => s.id === primarySection)!.label}
+              </span>
+              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-cyan-400/60">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
+                Primary
+              </span>
+            </div>
+            <div className="flex flex-1 flex-col overflow-hidden">
+              {renderSection(primarySection, gmailStatus)}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 overflow-y-auto p-6">
+            {rightSections.map((s) => (
+              <DashboardWidget key={s.id} section={s} onFocus={() => setPrimarySection(s.id)}>
+                {renderSection(s.id, gmailStatus)}
+              </DashboardWidget>
+            ))}
+          </div>
+        </main>
+
+        <div className="flex items-center justify-between border-t border-cyan-400/10 bg-black/30 px-5 py-2 text-[10px] uppercase tracking-wider text-cyan-400/60">
+          <span className="flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+            Alfred Online
+          </span>
+          {now && (
+            <>
+              <span>
+                {now.toLocaleDateString(undefined, {
+                  weekday: "long",
+                  month: "long",
+                  day: "numeric",
+                })}
+              </span>
+              <span className="font-display">{now.toLocaleTimeString()}</span>
+            </>
           )}
         </div>
       </div>
@@ -237,32 +262,44 @@ export default function HomeClient() {
 }
 
 function Header({
-  activeSection,
+  primarySection,
   onSelect,
+  now,
 }: {
-  activeSection: string;
+  primarySection: string;
   onSelect: (id: string) => void;
+  now: Date | null;
 }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-black/30 px-5 py-4 backdrop-blur-2xl md:px-8">
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-cyan-400/20 bg-black/40 px-5 py-4 backdrop-blur-2xl md:px-8">
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-600 text-sm font-semibold text-black shadow-[0_0_12px_rgba(34,211,238,0.5)]">
           A
         </div>
         <div>
-          <div className="text-base font-semibold leading-tight text-white">Alfred</div>
-          <div className="text-xs text-slate-400">Personal AI Assistant</div>
+          <div className="font-display text-base font-semibold leading-tight tracking-wide text-white">
+            ALFRED
+          </div>
+          <div className={HUD_LABEL}>Personal AI Assistant</div>
         </div>
+        {now && (
+          <div className="ml-4 hidden border-l border-cyan-400/20 pl-4 font-display text-sm text-cyan-300 sm:block">
+            {now.toLocaleTimeString()}
+            <span className="ml-2 text-[10px] uppercase tracking-wider text-cyan-400/50">
+              {now.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}
+            </span>
+          </div>
+        )}
       </div>
-      <nav className="flex flex-wrap items-center gap-1 rounded-full bg-black/20 p-1">
+      <nav className="flex flex-wrap items-center gap-1 rounded-full border border-cyan-400/10 bg-black/30 p-1">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
             onClick={() => onSelect(s.id)}
-            className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all duration-200 ease-out hover:scale-105 hover:shadow-[0_0_16px_2px_rgba(56,189,248,0.4)] md:text-sm ${
-              activeSection === s.id
-                ? "bg-indigo-600 text-white"
-                : "text-slate-300 hover:bg-white/5 hover:text-white"
+            className={`rounded-full px-3.5 py-1.5 text-xs font-medium uppercase tracking-wide transition-all duration-200 ease-out hover:scale-105 hover:shadow-[0_0_16px_2px_rgba(34,211,238,0.5)] md:text-sm ${
+              primarySection === s.id
+                ? "bg-cyan-600 text-black"
+                : "text-cyan-100/70 hover:bg-white/5 hover:text-white"
             }`}
           >
             {s.label}
@@ -298,17 +335,17 @@ function MemorySection({ gmailStatus }: { gmailStatus: string | null }) {
     <div className="flex flex-1 flex-col items-center overflow-y-auto px-6 py-10 text-center">
       <div className="w-full max-w-md">
         <div className={`${CARD} flex flex-col items-center gap-3 p-8`}>
-          <h2 className="text-xl font-semibold text-white">{section.label}</h2>
+          <h2 className="text-xl font-semibold uppercase tracking-wide text-white">{section.label}</h2>
           <p className="max-w-sm text-sm text-slate-400">{section.description}</p>
 
           {gmailStatus === "connected" && (
             <p className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
-              Gmail connected successfully.
+              Google account connected successfully (Gmail + Calendar).
             </p>
           )}
           {gmailStatus === "error" && (
             <p className="rounded-full bg-red-500/15 px-3 py-1 text-xs font-medium text-red-300">
-              Something went wrong connecting Gmail. Try again.
+              Something went wrong connecting your Google account. Try again.
             </p>
           )}
           {gmailStatus === "no_refresh_token" && (
@@ -332,12 +369,12 @@ function MemorySection({ gmailStatus }: { gmailStatus: string | null }) {
               href="/api/auth/google"
               className={`rounded-full px-5 py-2 text-sm font-medium text-white ${ACCENT}`}
             >
-              Connect Gmail
+              Connect Gmail &amp; Calendar
             </a>
             <button
               onClick={sync}
               disabled={syncing}
-              className="rounded-full border border-white/15 px-5 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="rounded-full border border-cyan-400/20 px-5 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               {syncing ? "Syncing..." : "Sync Email (last 30 days)"}
             </button>
@@ -453,7 +490,7 @@ function DailyPlanningSection() {
       <div className="w-full max-w-xl">
         <div className={`${CARD} mb-4 flex items-center justify-between p-5`}>
           <div>
-            <h2 className="text-lg font-semibold text-white">{section.label}</h2>
+            <h2 className="text-lg font-semibold uppercase tracking-wide text-white">{section.label}</h2>
             <p className="text-sm text-slate-400">
               {new Date().toLocaleDateString(undefined, {
                 weekday: "long",
@@ -497,7 +534,7 @@ function DailyPlanningSection() {
                       type="checkbox"
                       checked={done}
                       onChange={() => toggleDone(item)}
-                      className="mt-1 h-4 w-4 accent-indigo-500"
+                      className="mt-1 h-4 w-4 accent-cyan-500"
                     />
                   ) : (
                     <span className="mt-1 h-4 w-4 shrink-0" />
@@ -521,7 +558,7 @@ function DailyPlanningSection() {
                   {item.task_id && !urgent && (
                     <button
                       onClick={() => flagUrgent(item)}
-                      className="shrink-0 rounded-full border border-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-400 hover:border-white/20 hover:text-white"
+                      className="shrink-0 rounded-full border border-cyan-400/15 px-2.5 py-1 text-[11px] font-medium text-slate-400 hover:border-cyan-400/40 hover:text-white"
                     >
                       Mark urgent
                     </button>
@@ -601,7 +638,7 @@ function TaskDocuments({ taskId }: { taskId: string }) {
               href={doc.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-indigo-300 underline hover:text-indigo-200"
+              className="text-cyan-300 underline hover:text-cyan-200"
             >
               {doc.filename}
             </a>
@@ -679,7 +716,7 @@ function TasksSection() {
     <div className="flex flex-1 flex-col items-center overflow-y-auto px-6 py-8">
       <div className="w-full max-w-xl">
         <div className={`${CARD} mb-4 p-5`}>
-          <h2 className="text-lg font-semibold text-white">{section.label}</h2>
+          <h2 className="text-lg font-semibold uppercase tracking-wide text-white">{section.label}</h2>
           <p className="mb-3 text-sm text-slate-400">{section.description}</p>
           <input
             ref={fileInputRef}
@@ -731,7 +768,7 @@ function TasksSection() {
                       checked={false}
                       onClick={(e) => e.stopPropagation()}
                       onChange={() => markDone(task)}
-                      className="mt-1 h-4 w-4 accent-indigo-500"
+                      className="mt-1 h-4 w-4 accent-cyan-500"
                     />
                     <div className="flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -753,7 +790,7 @@ function TasksSection() {
                   </div>
 
                   {expanded && (
-                    <div className="space-y-2 border-t border-white/10 px-4 py-3 text-sm">
+                    <div className="space-y-2 border-t border-cyan-400/15 px-4 py-3 text-sm">
                       <div className="flex justify-between gap-4">
                         <span className="text-slate-500">Description</span>
                         <span className="text-right text-slate-300">
@@ -788,7 +825,7 @@ function TasksSection() {
                       <div className="flex justify-end pt-1">
                         <button
                           onClick={() => remove(task)}
-                          className="rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-slate-400 hover:border-white/20 hover:text-white"
+                          className="rounded-full border border-cyan-400/15 px-3 py-1 text-xs font-medium text-slate-400 hover:border-cyan-400/40 hover:text-white"
                         >
                           Remove
                         </button>
@@ -862,7 +899,7 @@ function Chat() {
                 m.component ? "max-w-[95%]" : "max-w-[80%]"
               } ${
                 m.role === "user"
-                  ? "ml-auto whitespace-pre-wrap bg-indigo-600 text-white"
+                  ? "ml-auto whitespace-pre-wrap bg-cyan-600 text-white"
                   : `prose prose-sm prose-invert max-w-none ${CARD} text-slate-200`
               }`}
             >
@@ -890,7 +927,7 @@ function Chat() {
 
         <div className="mt-4 flex gap-2">
           <input
-            className="flex-1 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-white placeholder:text-slate-500 focus:border-indigo-500/50 focus:outline-none"
+            className="min-w-0 flex-1 rounded-full border border-cyan-400/15 bg-white/5 px-4 py-2.5 text-white placeholder:text-slate-500 focus:border-cyan-500/50 focus:outline-none"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -901,7 +938,7 @@ function Chat() {
           <button
             onClick={sendMessage}
             disabled={loading}
-            className={`rounded-full px-5 py-2.5 font-medium text-white disabled:opacity-50 ${ACCENT}`}
+            className={`shrink-0 rounded-full px-5 py-2.5 font-medium text-white disabled:opacity-50 ${ACCENT}`}
           >
             Send
           </button>
@@ -934,14 +971,14 @@ function GeneratedTaskList({
 
   if (data.items.length === 0) {
     return (
-      <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-400">
+      <div className="mt-3 rounded-xl border border-cyan-400/15 bg-cyan-950/20 p-4 text-sm text-slate-400">
         Nothing to show for &ldquo;{data.title}&rdquo;.
       </div>
     );
   }
 
   return (
-    <div className="not-prose mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+    <div className="not-prose mt-3 rounded-xl border border-cyan-400/15 bg-cyan-950/20 p-3">
       <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
         {data.title}
       </p>
@@ -951,13 +988,13 @@ function GeneratedTaskList({
           return (
             <li
               key={item.id}
-              className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2"
+              className="flex items-center gap-2.5 rounded-lg bg-cyan-950/20 px-3 py-2"
             >
               <input
                 type="checkbox"
                 checked={done}
                 onChange={() => toggleDone(item.id, done)}
-                className="h-4 w-4 accent-indigo-500"
+                className="h-4 w-4 accent-cyan-500"
               />
               <span className={`flex-1 text-sm text-slate-200 ${done ? "line-through opacity-50" : ""}`}>
                 {item.title}
@@ -985,14 +1022,14 @@ function GeneratedCalendar({
 }) {
   if (data.events.length === 0) {
     return (
-      <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-400">
+      <div className="mt-3 rounded-xl border border-cyan-400/15 bg-cyan-950/20 p-4 text-sm text-slate-400">
         Nothing scheduled for &ldquo;{data.title}&rdquo;.
       </div>
     );
   }
 
   return (
-    <div className="not-prose mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+    <div className="not-prose mt-3 rounded-xl border border-cyan-400/15 bg-cyan-950/20 p-3">
       <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
         {data.title}
       </p>
@@ -1000,7 +1037,7 @@ function GeneratedCalendar({
         {data.events.map((event) => (
           <li
             key={event.id}
-            className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2"
+            className="flex items-center gap-2.5 rounded-lg bg-cyan-950/20 px-3 py-2"
           >
             <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-slate-400">
               {event.type}

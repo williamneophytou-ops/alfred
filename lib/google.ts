@@ -11,9 +11,14 @@ export function getOAuthClient(redirectUri?: string) {
   );
 }
 
-export const GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
+// One combined connection covers both Gmail and Calendar — re-consent is
+// only needed when a new scope is added, not per-feature.
+export const GMAIL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
+];
 
-async function getGmailClient() {
+async function getAuthorizedClient() {
   const { data, error } = await getSupabase()
     .from("google_tokens")
     .select("refresh_token")
@@ -21,12 +26,20 @@ async function getGmailClient() {
     .single();
 
   if (error || !data) {
-    throw new Error("Gmail is not connected yet.");
+    throw new Error("Google account is not connected yet.");
   }
 
   const client = getOAuthClient();
   client.setCredentials({ refresh_token: data.refresh_token });
-  return google.gmail({ version: "v1", auth: client });
+  return client;
+}
+
+async function getGmailClient() {
+  return google.gmail({ version: "v1", auth: await getAuthorizedClient() });
+}
+
+export async function getCalendarClient() {
+  return google.calendar({ version: "v3", auth: await getAuthorizedClient() });
 }
 
 function decodeBase64Url(data: string): string {

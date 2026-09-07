@@ -22,7 +22,11 @@ function systemPrompt(): string {
     "for passive facts/preferences with nothing to act on. Resolve relative dates like 'next " +
     "Thursday' or 'in three days' against today's date above. Use show_component when an actual " +
     "task list or calendar view would genuinely help more than text (e.g. 'what's on today', " +
-    "'show my week') — reference real task ids, never invented ones."
+    "'show my week') — reference real task ids, never invented ones. Use check_calendar to see " +
+    "what's really on the user's Google Calendar (separate from internally tracked tasks) whenever " +
+    "they ask about their actual schedule/calendar. Use add_calendar_event for genuine scheduled " +
+    "events with a specific time (appointments, meetings) — call it alongside add_task when it's " +
+    "also worth tracking as a task, not as a replacement for it."
   );
 }
 

@@ -7,6 +7,7 @@ import {
   getTasksInRange,
   type NewTask,
 } from "./tasks";
+import { listCalendarEvents, createCalendarEvent } from "./calendar";
 
 export type ComponentPayload =
   | {
@@ -108,6 +109,39 @@ const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: "check_calendar",
+    description:
+      "Read the user's real Google Calendar for a date range — separate from add_task's internal tracking. Use this whenever the user asks what's actually on their calendar/schedule.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        range_start: { type: "string", description: "ISO 8601 date-time, start of the range." },
+        range_end: { type: "string", description: "ISO 8601 date-time, end of the range." },
+      },
+      required: ["range_start", "range_end"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "add_calendar_event",
+    description:
+      "Create a real event directly on the user's Google Calendar — separate from add_task (which only tracks things internally for planning). Use this for genuine scheduled events with a specific time (appointments, meetings), in addition to add_task if it's also worth tracking as a task.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: ["string", "null"] },
+        start: { type: "string", description: "ISO 8601 date-time the event starts." },
+        end: { type: "string", description: "ISO 8601 date-time the event ends." },
+        location: { type: ["string", "null"] },
+      },
+      required: ["title", "description", "start", "end", "location"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "show_component",
     description:
       "Display an interactive visual view in the chat instead of (or alongside) plain text — a task list or a calendar/timeline. Use this when a visual genuinely helps (e.g. 'what's on my plate', 'show my week') — not for ordinary conversation. Reference real tasks by id (from recall/add_task results or the tracked-tasks list) rather than inventing details — the actual current title/due date/status is looked up server-side, so you can't get this wrong.",
@@ -167,6 +201,47 @@ async function executeTool(
     const taskId = await addTask({ ...task, source });
     return { result: taskId ? "Task added." : "Failed to add that task." };
   }
+  if (name === "check_calendar") {
+    const { range_start, range_end } = input as { range_start: string; range_end: string };
+    try {
+      const events = await listCalendarEvents(range_start, range_end);
+      return {
+        result:
+          events.length > 0
+            ? events
+                .map((e) => `- ${e.title} (${e.start}${e.location ? `, ${e.location}` : ""})`)
+                .join("\n")
+            : "No events found in that range.",
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Calendar check failed.";
+      return { result: message };
+    }
+  }
+  if (name === "add_calendar_event") {
+    const { title, description, start, end, location } = input as {
+      title: string;
+      description: string | null;
+      start: string;
+      end: string;
+      location: string | null;
+    };
+    try {
+      const { ok, link } = await createCalendarEvent({
+        title,
+        description: description ?? undefined,
+        startIso: start,
+        endIso: end,
+        location: location ?? undefined,
+      });
+      return {
+        result: ok ? `Event created.${link ? ` (${link})` : ""}` : "Failed to create the event.",
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to create the event.";
+      return { result: message };
+    }
+  }
   if (name === "show_component") {
     const { component_type, title, task_ids, range_start, range_end } = input as {
       component_type: "task_list" | "calendar";
@@ -195,19 +270,42 @@ async function executeTool(
     }
 
     if (component_type === "calendar" && range_start && range_end) {
+      type MergedEvent = { id: string; title: string; start: string; end: string | null; type: string };
+
       const tasks = await getTasksInRange(range_start, range_end);
+      const taskEvents: MergedEvent[] = tasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        start: t.due_at as string,
+        end: null,
+        type: t.type,
+      }));
+
+      // Merge in real Google Calendar events too, if connected — best
+      // effort, since a calendar view shouldn't fail just because that
+      // separate connection isn't set up.
+      let calendarEvents: MergedEvent[] = [];
+      try {
+        const events = await listCalendarEvents(range_start, range_end);
+        calendarEvents = events.map((e) => ({
+          id: e.id,
+          title: e.title,
+          start: e.start,
+          end: e.end,
+          type: "calendar_event",
+        }));
+      } catch {
+        // Not connected, or the call failed — show tasks only.
+      }
+
       const component: ComponentPayload = {
         type: "calendar",
         data: {
           title,
           range: { start: range_start, end: range_end },
-          events: tasks.map((t) => ({
-            id: t.id,
-            title: t.title,
-            start: t.due_at as string,
-            end: null,
-            type: t.type,
-          })),
+          events: [...taskEvents, ...calendarEvents].sort((a, b) =>
+            a.start.localeCompare(b.start)
+          ),
         },
       };
       return { result: "Shown to the user.", component };
