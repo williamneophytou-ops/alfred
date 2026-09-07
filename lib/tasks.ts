@@ -25,20 +25,25 @@ export type NewTask = {
   source?: string;
 };
 
-export async function addTask(task: NewTask): Promise<boolean> {
-  const { error } = await getSupabase().from("tasks_and_events").insert({
-    title: task.title,
-    description: task.description ?? null,
-    due_at: task.due_at ?? null,
-    priority: task.priority ?? "normal",
-    type: task.type ?? "task",
-    source: task.source ?? "chat",
-  });
-  if (error) {
+/** Returns the new task's id, or null on failure. */
+export async function addTask(task: NewTask): Promise<string | null> {
+  const { data, error } = await getSupabase()
+    .from("tasks_and_events")
+    .insert({
+      title: task.title,
+      description: task.description ?? null,
+      due_at: task.due_at ?? null,
+      priority: task.priority ?? "normal",
+      type: task.type ?? "task",
+      source: task.source ?? "chat",
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
     console.error("Failed to add task:", error);
-    return false;
+    return null;
   }
-  return true;
+  return data.id as string;
 }
 
 /**

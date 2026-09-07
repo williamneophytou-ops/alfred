@@ -534,11 +534,66 @@ function formatDateTime(iso: string) {
   });
 }
 
+type TaskDocument = {
+  id: string;
+  filename: string;
+  url: string | null;
+};
+
+function TaskDocuments({ taskId }: { taskId: string }) {
+  const [docs, setDocs] = useState<TaskDocument[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/documents?taskId=${taskId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setDocs(data.documents ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setDocs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
+
+  if (!docs || docs.length === 0) return null;
+
+  return (
+    <div className="flex justify-between gap-4">
+      <span className="text-slate-500">Files</span>
+      <div className="flex flex-col items-end gap-1">
+        {docs.map((doc) =>
+          doc.url ? (
+            <a
+              key={doc.id}
+              href={doc.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-300 underline hover:text-indigo-200"
+            >
+              {doc.filename}
+            </a>
+          ) : (
+            <span key={doc.id} className="text-slate-500">
+              {doc.filename}
+            </span>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TasksSection() {
   const section = SECTIONS.find((s) => s.id === "tasks")!;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function loadTasks() {
     setLoading(true);
@@ -554,6 +609,23 @@ function TasksSection() {
   useEffect(() => {
     loadTasks();
   }, []);
+
+  async function uploadFile(file: File) {
+    setUploading(true);
+    setUploadMessage(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/documents", { method: "POST", body: formData });
+      const data = await res.json();
+      setUploadMessage(data.message ?? data.error ?? "Upload finished.");
+      if (data.taskCreated) await loadTasks();
+    } catch {
+      setUploadMessage("Something went wrong uploading that file.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function markDone(task: Task) {
     setTasks((prev) => prev.filter((t) => t.id !== task.id));
@@ -576,9 +648,32 @@ function TasksSection() {
   return (
     <div className="flex flex-1 flex-col items-center overflow-y-auto px-6 py-8">
       <div className="w-full max-w-xl">
-        <div className="mb-4">
+        <div className={`${CARD} mb-4 p-5`}>
           <h2 className="text-lg font-semibold text-white">{section.label}</h2>
-          <p className="text-sm text-slate-400">{section.description}</p>
+          <p className="mb-3 text-sm text-slate-400">{section.description}</p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) uploadFile(file);
+              e.target.value = "";
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className={`rounded-full px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50 ${ACCENT}`}
+          >
+            {uploading ? "Reading..." : "Upload schoolwork / document"}
+          </button>
+          <p className="mt-1.5 text-xs text-slate-500">
+            PDF or image — Alfred reads it, adds any due date as a task, and keeps the file
+            attached to it.
+          </p>
+          {uploadMessage && <p className="mt-2 text-sm text-slate-300">{uploadMessage}</p>}
         </div>
 
         {loading && <p className="px-1 text-slate-400">Loading tasks...</p>}
@@ -659,6 +754,7 @@ function TasksSection() {
                         <span className="text-slate-500">Added</span>
                         <span className="text-slate-300">{formatDateTime(task.created_at)}</span>
                       </div>
+                      <TaskDocuments taskId={task.id} />
                       <div className="flex justify-end pt-1">
                         <button
                           onClick={() => remove(task)}

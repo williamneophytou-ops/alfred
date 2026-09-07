@@ -77,18 +77,30 @@ function extractBodyText(payload: gmail_v1.Schema$MessagePart | undefined): stri
   return "";
 }
 
-function collectAttachmentNames(
+export type AttachmentRef = {
+  filename: string;
+  mimeType: string;
+  attachmentId: string;
+};
+
+function collectAttachments(
   payload: gmail_v1.Schema$MessagePart | undefined
-): string[] {
+): AttachmentRef[] {
   if (!payload) return [];
-  const names: string[] = [];
-  if (payload.filename) names.push(payload.filename);
+  const refs: AttachmentRef[] = [];
+  if (payload.filename && payload.body?.attachmentId) {
+    refs.push({
+      filename: payload.filename,
+      mimeType: payload.mimeType ?? "application/octet-stream",
+      attachmentId: payload.body.attachmentId,
+    });
+  }
   if (payload.parts) {
     for (const part of payload.parts) {
-      names.push(...collectAttachmentNames(part));
+      refs.push(...collectAttachments(part));
     }
   }
-  return names;
+  return refs;
 }
 
 export type EmailSummary = {
@@ -96,8 +108,25 @@ export type EmailSummary = {
   from: string;
   date: string;
   snippet: string;
-  attachments: string[];
+  messageId: string;
+  attachments: AttachmentRef[];
 };
+
+/** Downloads one attachment's raw bytes. */
+export async function downloadAttachment(
+  messageId: string,
+  attachmentId: string
+): Promise<Buffer> {
+  const gmail = await getGmailClient();
+  const res = await gmail.users.messages.attachments.get({
+    userId: "me",
+    messageId,
+    id: attachmentId,
+  });
+  const data = res.data.data;
+  if (!data) throw new Error("Attachment had no data.");
+  return Buffer.from(data, "base64url");
+}
 
 const MAX_EMAILS = 100;
 
@@ -203,13 +232,14 @@ export async function fetchNewEmails(fallbackDays: number): Promise<FetchResult>
     const date = headers.find((h) => h.name === "Date")?.value ?? "";
 
     const bodyText = extractBodyText(full.payload) || full.snippet || "";
-    const attachments = collectAttachmentNames(full.payload);
+    const attachments = collectAttachments(full.payload);
 
     results.push({
       subject,
       from,
       date,
       snippet: bodyText.slice(0, 1000),
+      messageId: msg.id,
       attachments,
     });
   }
