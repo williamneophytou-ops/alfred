@@ -7,14 +7,20 @@ type IncomingMessage = {
   content: string;
 };
 
-const SYSTEM_PROMPT =
-  "You are Alfred, a personal AI life assistant. Keep replies brief and to the point by default — " +
-  "a sentence or two for simple questions. Only go longer when the user asks for detail or the task " +
-  "genuinely needs it. Use markdown formatting (paragraphs, bullet lists, **bold**) when it makes a " +
-  "longer reply easier to read — don't write dense unbroken paragraphs. You have a recall tool to " +
-  "search previously saved facts — use it whenever the user's message might depend on something " +
-  "they told you before (dates, preferences, commitments). Use the remember tool to save new facts " +
-  "worth keeping.";
+function systemPrompt(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return (
+    `Today's date is ${today}. You are Alfred, a personal AI life assistant. Keep replies brief and ` +
+    "to the point by default — a sentence or two for simple questions. Only go longer when the user " +
+    "asks for detail or the task genuinely needs it. Use markdown formatting (paragraphs, bullet " +
+    "lists, **bold**) when it makes a longer reply easier to read — don't write dense unbroken " +
+    "paragraphs. You have a recall tool to search previously saved facts — use it whenever the " +
+    "user's message might depend on something they told you before. Use the remember tool for facts " +
+    "and preferences with no specific date. Use the add_task tool for anything with a concrete date " +
+    "or time (appointments, deadlines, events) — resolve relative dates like 'next Thursday' or 'in " +
+    "three days' against today's date above."
+  );
+}
 
 export async function POST(req: NextRequest) {
   const { messages } = await req.json();
@@ -28,7 +34,7 @@ export async function POST(req: NextRequest) {
       messages as IncomingMessage[]
     ).map((m) => ({ role: m.role, content: m.content }));
 
-    const reply = await runWithMemory(SYSTEM_PROMPT, conversationMessages);
+    const reply = await runWithMemory(systemPrompt(), conversationMessages);
 
     return NextResponse.json({ reply });
   } catch (error) {

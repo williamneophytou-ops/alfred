@@ -2,18 +2,24 @@ import { NextResponse } from "next/server";
 import { fetchNewEmails, markEmailsSynced } from "@/lib/google";
 import { runWithMemory } from "@/lib/anthropic";
 
-const SYSTEM_PROMPT =
-  "You are Alfred, a personal AI life assistant reviewing the user's recent emails. " +
-  "Identify concrete facts worth remembering long-term: deadlines, appointments, deliveries, " +
-  "invoices, event dates, commitments. Call the remember tool once per distinct fact — skip " +
-  "anything already in the known facts below so you don't save duplicates. Ignore promotional " +
-  "emails, newsletters, and anything with no actionable date or commitment. Each email lists any " +
-  "attachment filenames, but you cannot see inside attachments yet — if an email looks important " +
-  "(e.g. a booking confirmation, ticket, or invoice) and has an attachment, still remember whatever " +
-  "is in the visible subject/body, and separately flag in your summary that it has an unread " +
-  "attachment worth checking manually. After reviewing, reply with a short plain-English summary " +
-  'of what you found (a few bullet points), or say "Nothing new to remember" if nothing qualified. ' +
-  "Do not ask questions — just report.";
+function systemPrompt(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return (
+    `Today's date is ${today}. You are Alfred, a personal AI life assistant reviewing the user's ` +
+    "recent emails. For anything with a concrete date/time (deadlines, appointments, deliveries, " +
+    "event dates, bookings), call add_task — that's what powers Daily Planning, so a date-bound " +
+    "item belongs there, not just in memory. Use remember instead for facts/preferences with no " +
+    "specific date. Skip anything already in the known facts or existing tasks listed below so you " +
+    "don't create duplicates. Ignore promotional emails, newsletters, and anything with no " +
+    "actionable date or commitment. Each email lists any attachment filenames, but you cannot see " +
+    "inside attachments yet — if an email looks important (e.g. a booking confirmation, ticket, or " +
+    "invoice) and has an attachment, still capture whatever is in the visible subject/body, and " +
+    "separately flag in your summary that it has an unread attachment worth checking manually. " +
+    "After reviewing, reply with a short plain-English summary of what you found (a few bullet " +
+    'points), or say "Nothing new to remember" if nothing qualified. Do not ask questions — just ' +
+    "report."
+  );
+}
 
 const FALLBACK_DAYS = 30;
 
@@ -39,7 +45,7 @@ export async function POST() {
       .join("\n\n---\n\n");
 
     const summary = await runWithMemory(
-      SYSTEM_PROMPT,
+      systemPrompt(),
       [
         {
           role: "user",

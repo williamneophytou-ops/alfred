@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { loadMemories, saveMemory, searchMemories } from "./memory";
+import { addTask, listActiveTasks, type NewTask } from "./tasks";
 
 export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -36,6 +37,39 @@ const tools: Anthropic.Tool[] = [
       required: ["query"],
     },
   },
+  {
+    name: "add_task",
+    description:
+      "Add a structured task, event, deadline, or recurring commitment with a concrete date/time — this is what powers Daily Planning, so use it (instead of, or alongside, remember) whenever something has a due date or happens at a specific time. Use `remember` instead for facts/preferences with no date attached.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Short name of the task/event, e.g. 'Driving course' or 'Finish maths homework'.",
+        },
+        description: {
+          type: "string",
+          description: "Optional extra detail.",
+        },
+        due_at: {
+          type: "string",
+          description:
+            "ISO 8601 date-time when it's due or happening, e.g. '2026-09-09T08:30:00'. Omit if there's no specific date.",
+        },
+        priority: {
+          type: "string",
+          enum: ["urgent", "normal"],
+          description: "Mark 'urgent' only if the user explicitly signals this matters more than usual.",
+        },
+        type: {
+          type: "string",
+          enum: ["task", "event", "deadline", "recurring"],
+        },
+      },
+      required: ["title"],
+    },
+  },
 ];
 
 async function executeTool(name: string, input: unknown): Promise<string> {
@@ -50,6 +84,11 @@ async function executeTool(name: string, input: unknown): Promise<string> {
     return matches.length > 0
       ? matches.map((m) => `- ${m}`).join("\n")
       : "No matching memories found.";
+  }
+  if (name === "add_task") {
+    const task = input as NewTask;
+    const ok = await addTask({ ...task, source: "chat" });
+    return ok ? "Task added." : "Failed to add that task.";
   }
   return "Unknown tool.";
 }
@@ -140,10 +179,21 @@ export async function runWithMemory(
 }
 
 async function buildFullMemoryContext(): Promise<string> {
-  const memories = await loadMemories();
-  return memories.length > 0
-    ? `Known facts, remembered from past conversations and emails:\n${memories
-        .map((m) => `- ${m}`)
-        .join("\n")}`
-    : "No facts have been remembered yet.";
+  const [memories, tasks] = await Promise.all([loadMemories(), listActiveTasks()]);
+
+  const memoryPart =
+    memories.length > 0
+      ? `Known facts, remembered from past conversations and emails:\n${memories
+          .map((m) => `- ${m}`)
+          .join("\n")}`
+      : "No facts have been remembered yet.";
+
+  const taskPart =
+    tasks.length > 0
+      ? `Existing tasks/events already tracked (don't re-add these — call add_task only for genuinely new items):\n${tasks
+          .map((t) => `- ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""}`)
+          .join("\n")}`
+      : "No tasks/events tracked yet.";
+
+  return `${memoryPart}\n\n${taskPart}`;
 }
