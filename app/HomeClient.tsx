@@ -113,11 +113,9 @@ function CornerBrackets() {
 function DashboardWidget({
   section,
   onFocus,
-  children,
 }: {
   section: Section;
   onFocus: () => void;
-  children: React.ReactNode;
 }) {
   return (
     // Outer wrapper carries the hover grow + glow — it must NOT have
@@ -138,8 +136,143 @@ function DashboardWidget({
             Focus
           </button>
         </div>
-        <div className="flex flex-1 flex-col overflow-y-auto p-3">{children}</div>
+        <div className="flex flex-1 flex-col overflow-y-auto p-3">
+          {renderWidgetPreview(section.id)}
+        </div>
       </div>
+    </div>
+  );
+}
+
+// Compact, purpose-built previews for the widget tiles — never the full
+// section squeezed into a small box, just the small useful slice of it.
+function renderWidgetPreview(id: string) {
+  if (id === "chat") return <Chat />;
+  if (id === "memory") return <MemoryWidgetPreview />;
+  if (id === "planning") return <DailyPlanningWidgetPreview />;
+  return <TasksWidgetPreview />;
+}
+
+function DailyPlanningWidgetPreview() {
+  const [plan, setPlan] = useState<DailyPlan | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/daily-plan")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setPlan(data);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) return <p className="text-xs text-slate-500">Loading...</p>;
+  if (!plan || plan.items.length === 0) {
+    return <p className="text-xs text-slate-500">Nothing planned for today.</p>;
+  }
+
+  return (
+    <ul className="space-y-1.5">
+      {plan.items.map((item, i) => {
+        const done = item.task_id ? plan.tasks[item.task_id]?.status === "done" : false;
+        return (
+          <li
+            key={i}
+            className={`flex items-baseline gap-1.5 text-xs ${done ? "text-slate-600 line-through" : "text-slate-300"}`}
+          >
+            <span className="truncate">{item.title}</span>
+            {item.time && <span className="shrink-0 text-slate-500">{item.time}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function TasksWidgetPreview() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/tasks")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setTasks(data.tasks ?? []);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) return <p className="text-xs text-slate-500">Loading...</p>;
+  if (tasks.length === 0) {
+    return <p className="text-xs text-slate-500">Nothing tracked yet.</p>;
+  }
+
+  return (
+    <ul className="space-y-1.5">
+      {tasks.map((t) => (
+        <li key={t.id} className="flex items-baseline gap-1.5 text-xs text-slate-300">
+          <span className="truncate">{t.title}</span>
+          {t.due_at && (
+            <span className="shrink-0 text-slate-500">
+              {new Date(t.due_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function MemoryWidgetPreview() {
+  const [connected, setConnected] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/google/status")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setConnected(!!data.connected);
+      })
+      .catch(() => {
+        if (!cancelled) setConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (connected === null) return null;
+
+  if (connected) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
+          Connected
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 items-center justify-center">
+      <a
+        href="/api/auth/google"
+        className={`rounded-full px-3 py-1.5 text-xs font-medium text-white ${ACCENT}`}
+      >
+        Connect Gmail &amp; Calendar
+      </a>
     </div>
   );
 }
@@ -208,9 +341,7 @@ export default function HomeClient() {
           <div className="flex flex-col gap-3 overflow-y-auto p-6">
             <TimeWidget now={now} />
             {leftSections.map((s) => (
-              <DashboardWidget key={s.id} section={s} onFocus={() => setPrimarySection(s.id)}>
-                {renderSection(s.id, gmailStatus)}
-              </DashboardWidget>
+              <DashboardWidget key={s.id} section={s} onFocus={() => setPrimarySection(s.id)} />
             ))}
           </div>
 
@@ -231,9 +362,7 @@ export default function HomeClient() {
 
           <div className="flex flex-col gap-3 overflow-y-auto p-6">
             {rightSections.map((s) => (
-              <DashboardWidget key={s.id} section={s} onFocus={() => setPrimarySection(s.id)}>
-                {renderSection(s.id, gmailStatus)}
-              </DashboardWidget>
+              <DashboardWidget key={s.id} section={s} onFocus={() => setPrimarySection(s.id)} />
             ))}
           </div>
         </main>
