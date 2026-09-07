@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOAuthClient } from "@/lib/google";
 import { getSupabase } from "@/lib/supabase";
+import { requireSession } from "@/lib/session";
 
 export async function GET(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const code = req.nextUrl.searchParams.get("code");
   const error = req.nextUrl.searchParams.get("error");
 

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listActiveTasks, setTaskStatus, deleteTask } from "@/lib/tasks";
+import { requireSession } from "@/lib/session";
 
 export async function GET() {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   try {
     const tasks = await listActiveTasks();
     return NextResponse.json({ tasks });
@@ -12,6 +16,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   try {
     const { taskId, status } = await req.json();
     if (!taskId || !status) {
@@ -26,6 +33,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   try {
     const { taskId } = await req.json();
     if (!taskId) {

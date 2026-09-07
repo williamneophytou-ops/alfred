@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { fetchNewEmails, markEmailsSynced, downloadAttachment } from "@/lib/google";
 import { runWithMemory } from "@/lib/anthropic";
 import { processDocumentFile, isSupportedDocumentType } from "@/lib/documents";
+import { requireSession } from "@/lib/session";
 
 function systemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
@@ -25,6 +26,9 @@ function systemPrompt(): string {
 const FALLBACK_DAYS = 30;
 
 export async function POST() {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   try {
     const { emails, windowLabel, syncedAt } = await fetchNewEmails(FALLBACK_DAYS);
 

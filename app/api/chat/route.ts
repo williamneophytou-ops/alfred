@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 import { runWithMemory } from "@/lib/anthropic";
+import { requireSession } from "@/lib/session";
 
 type IncomingMessage = {
   role: "user" | "assistant";
@@ -24,6 +25,9 @@ function systemPrompt(): string {
 }
 
 export async function POST(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   const { messages } = await req.json();
 
   if (!Array.isArray(messages) || messages.length === 0) {

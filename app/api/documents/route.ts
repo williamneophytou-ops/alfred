@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processDocumentFile } from "@/lib/documents";
 import { getDocumentsForTask, getDocumentUrl } from "@/lib/storage";
+import { requireSession } from "@/lib/session";
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 
 export async function POST(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   try {
     const formData = await req.formData();
     const file = formData.get("file");
@@ -32,6 +36,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const unauthorized = await requireSession();
+  if (unauthorized) return unauthorized;
+
   try {
     const taskId = req.nextUrl.searchParams.get("taskId");
     if (!taskId) {
