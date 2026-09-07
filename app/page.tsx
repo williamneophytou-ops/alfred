@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -53,6 +55,18 @@ const SECTIONS: Section[] = [
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState("chat");
+  const [gmailStatus, setGmailStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("gmail");
+    if (status) {
+      setGmailStatus(status);
+      setActiveSection("memory");
+      // Clean the URL so refreshing doesn't re-show the banner.
+      window.history.replaceState({}, "", "/");
+    }
+  }, []);
 
   return (
     <div className="flex h-screen bg-zinc-50 font-sans dark:bg-black">
@@ -60,12 +74,95 @@ export default function Home() {
       <main className="flex flex-1 flex-col min-w-0">
         {activeSection === "chat" ? (
           <Chat />
+        ) : activeSection === "memory" ? (
+          <MemorySection gmailStatus={gmailStatus} />
         ) : (
           <Placeholder
             section={SECTIONS.find((s) => s.id === activeSection)!}
           />
         )}
       </main>
+    </div>
+  );
+}
+
+function MemorySection({ gmailStatus }: { gmailStatus: string | null }) {
+  const section = SECTIONS.find((s) => s.id === "memory")!;
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  async function sync() {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/sync-email", { method: "POST" });
+      const data = await res.json();
+      setSyncResult(
+        data.summary ?? data.error ?? "Sync finished with no summary."
+      );
+    } catch {
+      setSyncResult("Something went wrong syncing email.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+      <span className="text-4xl">{section.icon}</span>
+      <h2 className="text-xl font-semibold text-black dark:text-zinc-50">
+        {section.label}
+      </h2>
+      <p className="max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
+        {section.description}
+      </p>
+
+      {gmailStatus === "connected" && (
+        <p className="mt-2 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700 dark:bg-green-900 dark:text-green-300">
+          Gmail connected successfully.
+        </p>
+      )}
+      {gmailStatus === "error" && (
+        <p className="mt-2 rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700 dark:bg-red-900 dark:text-red-300">
+          Something went wrong connecting Gmail. Try again.
+        </p>
+      )}
+      {gmailStatus === "no_refresh_token" && (
+        <p className="mt-2 max-w-sm rounded-lg bg-yellow-100 px-3 py-2 text-xs font-medium text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300">
+          Google didn&apos;t return a long-lived connection. Go to your
+          Google Account&apos;s{" "}
+          <a
+            href="https://myaccount.google.com/connections"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            connected apps
+          </a>{" "}
+          settings, remove Alfred&apos;s access, then try connecting again.
+        </p>
+      )}
+
+      <div className="mt-4 flex gap-2">
+        <a
+          href="/api/auth/google"
+          className="rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background"
+        >
+          Connect Gmail
+        </a>
+        <button
+          onClick={sync}
+          disabled={syncing}
+          className="rounded-full border border-black/[.08] px-5 py-2 text-sm font-medium text-black disabled:opacity-50 dark:border-white/[.145] dark:text-zinc-50"
+        >
+          {syncing ? "Syncing..." : "Sync Email (last 30 days)"}
+        </button>
+      </div>
+      {syncResult && (
+        <div className="prose prose-sm mt-3 max-w-md text-left text-zinc-600 dark:prose-invert dark:text-zinc-400">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{syncResult}</ReactMarkdown>
+        </div>
+      )}
     </div>
   );
 }
@@ -175,11 +272,17 @@ function Chat() {
               key={i}
               className={`max-w-[80%] rounded-lg px-4 py-2 ${
                 m.role === "user"
-                  ? "ml-auto bg-black text-white dark:bg-zinc-50 dark:text-black"
-                  : "bg-white text-black dark:bg-zinc-900 dark:text-zinc-50"
+                  ? "ml-auto whitespace-pre-wrap bg-black text-white dark:bg-zinc-50 dark:text-black"
+                  : "prose prose-sm max-w-none bg-white text-black dark:prose-invert dark:bg-zinc-900 dark:text-zinc-50"
               }`}
             >
-              {m.content}
+              {m.role === "user" ? (
+                m.content
+              ) : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {m.content}
+                </ReactMarkdown>
+              )}
             </div>
           ))}
           {loading && (
