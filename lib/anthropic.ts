@@ -85,12 +85,31 @@ export async function runWithMemory(
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await anthropic.messages.create({
-      model: "claude-opus-5",
+      model: "claude-sonnet-5",
       max_tokens: 2048,
-      system: `${systemPrompt}\n\n${memoryContext}`,
+      system: [
+        {
+          type: "text",
+          text: `${systemPrompt}\n\n${memoryContext}`,
+          // Static per-route (chat's system+memory text never changes, sync's
+          // stays fixed for the duration of one sync's tool loop) — caching
+          // it cuts repeat-turn cost to ~10%, or ~2.5% within the 1h window.
+          cache_control: { type: "ephemeral", ttl: "1h" },
+        },
+      ],
       tools,
       messages,
     });
+
+    console.log(
+      "[USAGE] " +
+        JSON.stringify({
+          input: response.usage.input_tokens,
+          output: response.usage.output_tokens,
+          cache_write: response.usage.cache_creation_input_tokens,
+          cache_read: response.usage.cache_read_input_tokens,
+        })
+    );
 
     if (response.stop_reason !== "tool_use") {
       const textBlock = response.content.find((b) => b.type === "text");
