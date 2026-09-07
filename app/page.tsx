@@ -1,8 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+const BG_STORAGE_KEY = "alfred-bg-image";
+
+/** Downscales/re-encodes an image file to a reasonably-sized JPEG data URL,
+ * so a full-resolution photo doesn't blow past localStorage's quota. */
+function fileToBackgroundDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not read that image."));
+      img.onload = () => {
+        const maxDim = 1920;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas not supported."));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -35,25 +71,34 @@ const SECTIONS: Section[] = [
   },
   {
     id: "tasks",
-    label: "Task Capture",
+    label: "Tasks",
     description:
-      "Capture tasks and reminders in natural language — \"remind me to...\", \"I've got X tonight\".",
-  },
-  {
-    id: "study",
-    label: "Study Assistant",
-    description:
-      "Revision plans and task breakdowns for studying. Deprioritized to a later version.",
+      "Everything Alfred is tracking — from chat, and automatically from your emails.",
   },
 ];
 
 // Shared card / accent styling — kept muted and consistent throughout.
-const CARD = "rounded-2xl bg-white/[0.04] border border-white/10";
+const CARD = "rounded-2xl bg-white/[0.04] border border-white/10 backdrop-blur-md";
+// The main shell: frosted, translucent "liquid glass" — a soft tint and
+// heavy blur over whatever's behind it (the custom background image, if
+// set), with a light inner rim to catch highlights like real glass does.
+const GLASS_SHELL =
+  "border border-white/20 bg-slate-950/60 backdrop-blur-3xl " +
+  "shadow-[0_8px_32px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.18)]";
+// A glassier, interactive variant for task list items — hover grows it
+// slightly and adds a soft light-blue glow around the edge.
+const TASK_CARD =
+  "rounded-2xl border border-white/10 bg-white/[0.06] backdrop-blur-md transition-all " +
+  "duration-200 ease-out hover:scale-[1.02] hover:border-sky-400/50 " +
+  "hover:shadow-[0_0_20px_2px_rgba(56,189,248,0.35)]";
 const ACCENT = "bg-indigo-600 hover:bg-indigo-500";
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState("chat");
   const [gmailStatus, setGmailStatus] = useState<string | null>(null);
+  const [bgImage, setBgImage] = useState<string | null>(null);
+  const [bgError, setBgError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -65,11 +110,50 @@ export default function Home() {
     }
   }, []);
 
-  const section = SECTIONS.find((s) => s.id === activeSection)!;
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(BG_STORAGE_KEY);
+      if (saved) setBgImage(saved);
+    } catch {
+      // Private browsing / storage disabled — just skip restoring a saved background.
+    }
+  }, []);
+
+  async function handleBackgroundFile(file: File) {
+    setBgError(null);
+    try {
+      const dataUrl = await fileToBackgroundDataUrl(file);
+      setBgImage(dataUrl);
+      try {
+        window.localStorage.setItem(BG_STORAGE_KEY, dataUrl);
+      } catch {
+        setBgError("Background applied, but couldn't be saved for next time (storage full).");
+      }
+    } catch {
+      setBgError("Couldn't use that image. Try a different file.");
+    }
+  }
+
+  function resetBackground() {
+    setBgImage(null);
+    setBgError(null);
+    try {
+      window.localStorage.removeItem(BG_STORAGE_KEY);
+    } catch {
+      // Nothing to clean up if storage was never available.
+    }
+  }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-300 to-slate-500 p-4 font-sans md:p-8">
-      <div className="flex h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] bg-[#12152a] shadow-2xl md:h-[calc(100vh-4rem)]">
+    <div
+      className={`flex min-h-screen items-center justify-center bg-cover bg-center p-4 font-sans md:p-8 ${
+        bgImage ? "" : "bg-gradient-to-br from-slate-300 to-slate-500"
+      }`}
+      style={bgImage ? { backgroundImage: `url(${bgImage})` } : undefined}
+    >
+      <div
+        className={`flex h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[2rem] md:h-[calc(100vh-4rem)] ${GLASS_SHELL}`}
+      >
         <Header activeSection={activeSection} onSelect={setActiveSection} />
         <main className="flex flex-1 flex-col overflow-hidden">
           {activeSection === "chat" ? (
@@ -79,9 +163,44 @@ export default function Home() {
           ) : activeSection === "planning" ? (
             <DailyPlanningSection />
           ) : (
-            <Placeholder section={section} />
+            <TasksSection />
           )}
         </main>
+      </div>
+
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-1.5">
+        {bgError && (
+          <p className="max-w-xs rounded-lg bg-red-500/15 px-3 py-1.5 text-xs text-red-300">
+            {bgError}
+          </p>
+        )}
+        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-slate-800/80 p-1 backdrop-blur-md">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleBackgroundFile(file);
+              e.target.value = "";
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-full px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            {bgImage ? "Change background" : "Set background image"}
+          </button>
+          {bgImage && (
+            <button
+              onClick={resetBackground}
+              className="rounded-full px-3 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              Reset
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -95,7 +214,7 @@ function Header({
   onSelect: (id: string) => void;
 }) {
   return (
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-800/60 px-5 py-4 md:px-8">
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-black/30 px-5 py-4 backdrop-blur-2xl md:px-8">
       <div className="flex items-center gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">
           A
@@ -110,7 +229,7 @@ function Header({
           <button
             key={s.id}
             onClick={() => onSelect(s.id)}
-            className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors md:text-sm ${
+            className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition-all duration-200 ease-out hover:scale-105 hover:shadow-[0_0_16px_2px_rgba(56,189,248,0.4)] md:text-sm ${
               activeSection === s.id
                 ? "bg-indigo-600 text-white"
                 : "text-slate-300 hover:bg-white/5 hover:text-white"
@@ -387,15 +506,174 @@ function DailyPlanningSection() {
   );
 }
 
-function Placeholder({ section }: { section: Section }) {
+type Task = {
+  id: string;
+  title: string;
+  description: string | null;
+  due_at: string | null;
+  status: "not_started" | "in_progress" | "done";
+  priority: "urgent" | "normal";
+  type: "task" | "event" | "deadline" | "recurring";
+  source: string;
+  created_at: string;
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  chat: "From a conversation",
+  email: "Found in your email",
+  manual: "Added manually",
+};
+
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function TasksSection() {
+  const section = SECTIONS.find((s) => s.id === "tasks")!;
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  async function loadTasks() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/tasks");
+      const data = await res.json();
+      setTasks(data.tasks ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadTasks();
+  }, []);
+
+  async function markDone(task: Task) {
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+    await fetch("/api/tasks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: task.id, status: "done" }),
+    });
+  }
+
+  async function remove(task: Task) {
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+    await fetch("/api/tasks", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: task.id }),
+    });
+  }
+
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-      <div className={`${CARD} flex max-w-sm flex-col items-center gap-3 p-8`}>
-        <h2 className="text-xl font-semibold text-white">{section.label}</h2>
-        <p className="text-sm text-slate-400">{section.description}</p>
-        <span className="mt-1 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-300">
-          Coming soon
-        </span>
+    <div className="flex flex-1 flex-col items-center overflow-y-auto px-6 py-8">
+      <div className="w-full max-w-xl">
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold text-white">{section.label}</h2>
+          <p className="text-sm text-slate-400">{section.description}</p>
+        </div>
+
+        {loading && <p className="px-1 text-slate-400">Loading tasks...</p>}
+
+        {!loading && tasks.length === 0 && (
+          <div className={`${CARD} p-6 text-center text-slate-400`}>
+            Nothing tracked yet. Just tell Alfred about something in Chat — a deadline, an
+            appointment, anything with a date — and it&apos;ll show up here. He&apos;ll also add
+            things he finds while syncing your email.
+          </div>
+        )}
+
+        {!loading && tasks.length > 0 && (
+          <ul className="space-y-3">
+            {tasks.map((task) => {
+              const expanded = expandedId === task.id;
+              return (
+                <li key={task.id} className={TASK_CARD}>
+                  <div
+                    className="flex cursor-pointer items-start gap-3 p-4"
+                    onClick={() => setExpandedId(expanded ? null : task.id)}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => markDone(task)}
+                      className="mt-1 h-4 w-4 accent-indigo-500"
+                    />
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-white">{task.title}</span>
+                        {task.priority === "urgent" && (
+                          <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-medium text-red-300">
+                            Urgent
+                          </span>
+                        )}
+                        <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                          {task.type}
+                        </span>
+                      </div>
+                      {task.due_at && (
+                        <p className="text-xs text-slate-500">Due {formatDateTime(task.due_at)}</p>
+                      )}
+                    </div>
+                    <span className="mt-1 text-xs text-slate-500">{expanded ? "Hide" : "Details"}</span>
+                  </div>
+
+                  {expanded && (
+                    <div className="space-y-2 border-t border-white/10 px-4 py-3 text-sm">
+                      <div className="flex justify-between gap-4">
+                        <span className="text-slate-500">Description</span>
+                        <span className="text-right text-slate-300">
+                          {task.description ?? "—"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-slate-500">Due</span>
+                        <span className="text-slate-300">
+                          {task.due_at ? formatDateTime(task.due_at) : "No specific date"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-slate-500">Type</span>
+                        <span className="text-slate-300">{task.type}</span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-slate-500">Priority</span>
+                        <span className="text-slate-300">{task.priority}</span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-slate-500">Source</span>
+                        <span className="text-slate-300">
+                          {SOURCE_LABEL[task.source] ?? task.source}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-4">
+                        <span className="text-slate-500">Added</span>
+                        <span className="text-slate-300">{formatDateTime(task.created_at)}</span>
+                      </div>
+                      <div className="flex justify-end pt-1">
+                        <button
+                          onClick={() => remove(task)}
+                          className="rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-slate-400 hover:border-white/20 hover:text-white"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </div>
   );

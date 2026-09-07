@@ -104,6 +104,15 @@ export async function setTaskStatus(id: string, status: TaskStatus): Promise<boo
   return true;
 }
 
+export async function deleteTask(id: string): Promise<boolean> {
+  const { error } = await getSupabase().from("tasks_and_events").delete().eq("id", id);
+  if (error) {
+    console.error("Failed to delete task:", error);
+    return false;
+  }
+  return true;
+}
+
 export async function setTaskPriority(id: string, priority: TaskPriority): Promise<boolean> {
   const { error } = await getSupabase()
     .from("tasks_and_events")

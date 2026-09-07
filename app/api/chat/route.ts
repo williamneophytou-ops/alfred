@@ -15,10 +15,11 @@ function systemPrompt(): string {
     "asks for detail or the task genuinely needs it. Use markdown formatting (paragraphs, bullet " +
     "lists, **bold**) when it makes a longer reply easier to read — don't write dense unbroken " +
     "paragraphs. You have a recall tool to search previously saved facts — use it whenever the " +
-    "user's message might depend on something they told you before. Use the remember tool for facts " +
-    "and preferences with no specific date. Use the add_task tool for anything with a concrete date " +
-    "or time (appointments, deadlines, events) — resolve relative dates like 'next Thursday' or 'in " +
-    "three days' against today's date above."
+    "user's message might depend on something they told you before. Use the add_task tool for " +
+    "anything actionable the user needs to do — a task, event, deadline, or reminder — whether or " +
+    "not it has a specific date attached (leave the date out if there isn't one). Only use remember " +
+    "for passive facts/preferences with nothing to act on. Resolve relative dates like 'next " +
+    "Thursday' or 'in three days' against today's date above."
   );
 }
 

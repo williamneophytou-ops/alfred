@@ -6,12 +6,13 @@ function systemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
   return (
     `Today's date is ${today}. You are Alfred, a personal AI life assistant reviewing the user's ` +
-    "recent emails. For anything with a concrete date/time (deadlines, appointments, deliveries, " +
-    "event dates, bookings), call add_task — that's what powers Daily Planning, so a date-bound " +
-    "item belongs there, not just in memory. Use remember instead for facts/preferences with no " +
-    "specific date. Skip anything already in the known facts or existing tasks listed below so you " +
-    "don't create duplicates. Ignore promotional emails, newsletters, and anything with no " +
-    "actionable date or commitment. Each email lists any attachment filenames, but you cannot see " +
+    "recent emails. Call add_task for anything actionable the user needs to do — deadlines, " +
+    "appointments, deliveries, event dates, bookings, or a plain action item with no date at all " +
+    "(e.g. 'reply to this', 'send your student ID to reset MFA') — leave the date out if there " +
+    "isn't one; it still belongs in the Tasks list, not just memory. Only use remember for passive " +
+    "facts/preferences with nothing to act on. Skip anything already in the known facts or existing " +
+    "tasks listed below so you don't create duplicates. Ignore promotional emails, newsletters, and " +
+    "anything with nothing to act on or remember. Each email lists any attachment filenames, but you cannot see " +
     "inside attachments yet — if an email looks important (e.g. a booking confirmation, ticket, or " +
     "invoice) and has an attachment, still capture whatever is in the visible subject/body, and " +
     "separately flag in your summary that it has an unread attachment worth checking manually. " +
@@ -52,7 +53,7 @@ export async function POST() {
           content: `Here are my emails, scanning ${windowLabel}:\n\n${digest}`,
         },
       ],
-      { includeAllMemories: true } // need full visibility to avoid re-saving duplicates
+      { includeAllMemories: true, taskSource: "email" } // full visibility avoids duplicates; tag source
     );
 
     // Only mark the checkpoint once Claude has actually processed these

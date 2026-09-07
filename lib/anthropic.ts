@@ -40,7 +40,8 @@ const tools: Anthropic.Tool[] = [
   {
     name: "add_task",
     description:
-      "Add a structured task, event, deadline, or recurring commitment with a concrete date/time — this is what powers Daily Planning, so use it (instead of, or alongside, remember) whenever something has a due date or happens at a specific time. Use `remember` instead for facts/preferences with no date attached.",
+      "Add a task, event, deadline, or recurring commitment — anything the user needs to actually DO, whether or not it has a specific date/time attached (leave due_at null if there's no date). This is what powers both Daily Planning and the Tasks list, so use it for any actionable to-do, not just date-bound ones. Use `remember` instead only for passive facts/preferences with nothing to act on (e.g. 'my favorite team is Arsenal').",
+    strict: true,
     input_schema: {
       type: "object",
       properties: {
@@ -49,13 +50,13 @@ const tools: Anthropic.Tool[] = [
           description: "Short name of the task/event, e.g. 'Driving course' or 'Finish maths homework'.",
         },
         description: {
-          type: "string",
-          description: "Optional extra detail.",
+          type: ["string", "null"],
+          description: "Optional extra detail, or null if none.",
         },
         due_at: {
-          type: "string",
+          type: ["string", "null"],
           description:
-            "ISO 8601 date-time when it's due or happening, e.g. '2026-09-09T08:30:00'. Omit if there's no specific date.",
+            "ISO 8601 date-time when it's due or happening, e.g. '2026-09-09T08:30:00'. Null if there's no specific date.",
         },
         priority: {
           type: "string",
@@ -67,12 +68,13 @@ const tools: Anthropic.Tool[] = [
           enum: ["task", "event", "deadline", "recurring"],
         },
       },
-      required: ["title"],
+      required: ["title", "description", "due_at", "priority", "type"],
+      additionalProperties: false,
     },
   },
 ];
 
-async function executeTool(name: string, input: unknown): Promise<string> {
+async function executeTool(name: string, input: unknown, source: string): Promise<string> {
   if (name === "remember") {
     const { content } = input as { content: string };
     const ok = await saveMemory(content);
@@ -87,7 +89,7 @@ async function executeTool(name: string, input: unknown): Promise<string> {
   }
   if (name === "add_task") {
     const task = input as NewTask;
-    const ok = await addTask({ ...task, source: "chat" });
+    const ok = await addTask({ ...task, source });
     return ok ? "Task added." : "Failed to add that task.";
   }
   return "Unknown tool.";
@@ -103,6 +105,8 @@ type RunOptions = {
    * for duplicates across many items at once).
    */
   includeAllMemories?: boolean;
+  /** Tag for anything add_task creates during this run — e.g. "chat" or "email". */
+  taskSource?: string;
 };
 
 /**
@@ -117,7 +121,7 @@ export async function runWithMemory(
 ): Promise<string> {
   const memoryContext = options.includeAllMemories
     ? await buildFullMemoryContext()
-    : "You don't have any facts loaded up front — call the recall tool to search saved memories whenever the user's message might depend on something you were told before.";
+    : await buildLeanContext();
 
   const messages = [...initialMessages];
   let finalReply = "";
@@ -164,7 +168,7 @@ export async function runWithMemory(
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const block of toolUseBlocks) {
-      const result = await executeTool(block.name, block.input);
+      const result = await executeTool(block.name, block.input, options.taskSource ?? "chat");
       toolResults.push({
         type: "tool_result",
         tool_use_id: block.id,
@@ -176,6 +180,28 @@ export async function runWithMemory(
   }
 
   return finalReply;
+}
+
+/**
+ * Default context for chat: no general facts pre-loaded (use recall for
+ * those), but active tasks ARE always included — that list stays naturally
+ * small (done tasks drop off it), so it's cheap, and it's what stops chat
+ * from creating duplicate tasks when something already tracked comes up
+ * again in conversation.
+ */
+async function buildLeanContext(): Promise<string> {
+  const tasks = await listActiveTasks();
+  const taskPart =
+    tasks.length > 0
+      ? `Currently tracked tasks/events (don't call add_task again for these — only for genuinely new items):\n${tasks
+          .map((t) => `- ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""}`)
+          .join("\n")}`
+      : "No tasks/events tracked yet.";
+
+  return (
+    "You don't have general facts loaded up front — call the recall tool to search saved " +
+    `memories whenever the user's message might depend on something you were told before.\n\n${taskPart}`
+  );
 }
 
 async function buildFullMemoryContext(): Promise<string> {
