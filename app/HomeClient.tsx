@@ -337,8 +337,8 @@ export default function HomeClient() {
       >
         <CornerBrackets />
         <Header primarySection={primarySection} onSelect={setPrimarySection} now={now} />
-        <main className="grid flex-1 grid-cols-1 gap-4 overflow-hidden p-4 lg:grid-cols-[260px_1fr_260px]">
-          <div className="flex flex-col gap-3 overflow-y-auto p-6">
+        <main className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[260px_1fr_260px] lg:overflow-hidden">
+          <div className="flex flex-col gap-3 overflow-y-auto p-3 lg:p-6">
             <TimeWidget now={now} />
             {leftSections.map((s) => (
               <DashboardWidget key={s.id} section={s} onFocus={() => setPrimarySection(s.id)} />
@@ -360,7 +360,7 @@ export default function HomeClient() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 overflow-y-auto p-6">
+          <div className="flex flex-col gap-3 overflow-y-auto p-3 lg:p-6">
             {rightSections.map((s) => (
               <DashboardWidget key={s.id} section={s} onFocus={() => setPrimarySection(s.id)} />
             ))}
