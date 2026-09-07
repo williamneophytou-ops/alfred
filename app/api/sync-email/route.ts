@@ -51,7 +51,7 @@ export async function POST() {
       )
       .join("\n\n---\n\n");
 
-    const summary = await runWithMemory(
+    const { reply: summary } = await runWithMemory(
       systemPrompt(),
       [
         {

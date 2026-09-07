@@ -40,9 +40,39 @@ function fileToBackgroundDataUrl(file: File): Promise<string> {
   });
 }
 
+type ComponentPayload =
+  | {
+      type: "task_list";
+      data: {
+        title: string;
+        items: {
+          id: string;
+          title: string;
+          due: string | null;
+          status: string;
+          priority: string;
+        }[];
+      };
+    }
+  | {
+      type: "calendar";
+      data: {
+        title: string;
+        range: { start: string; end: string };
+        events: {
+          id: string;
+          title: string;
+          start: string;
+          end: string | null;
+          type: string;
+        }[];
+      };
+    };
+
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  component?: ComponentPayload | null;
 };
 
 type Section = {
@@ -802,7 +832,11 @@ function Chat() {
 
       setMessages([
         ...nextMessages,
-        { role: "assistant", content: data.reply ?? data.error ?? "No response." },
+        {
+          role: "assistant",
+          content: data.reply ?? data.error ?? "No response.",
+          component: data.component ?? null,
+        },
       ]);
     } catch {
       setMessages([
@@ -824,7 +858,9 @@ function Chat() {
           {messages.map((m, i) => (
             <div
               key={i}
-              className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+              className={`rounded-2xl px-4 py-2.5 ${
+                m.component ? "max-w-[95%]" : "max-w-[80%]"
+              } ${
                 m.role === "user"
                   ? "ml-auto whitespace-pre-wrap bg-indigo-600 text-white"
                   : `prose prose-sm prose-invert max-w-none ${CARD} text-slate-200`
@@ -833,7 +869,15 @@ function Chat() {
               {m.role === "user" ? (
                 m.content
               ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                <>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                  {m.component?.type === "task_list" && (
+                    <GeneratedTaskList data={m.component.data} />
+                  )}
+                  {m.component?.type === "calendar" && (
+                    <GeneratedCalendar data={m.component.data} />
+                  )}
+                </>
               )}
             </div>
           ))}
@@ -863,6 +907,109 @@ function Chat() {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function GeneratedTaskList({
+  data,
+}: {
+  data: Extract<ComponentPayload, { type: "task_list" }>["data"];
+}) {
+  const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
+
+  async function toggleDone(id: string, currentlyDone: boolean) {
+    setDoneIds((prev) => {
+      const next = new Set(prev);
+      if (currentlyDone) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    await fetch("/api/tasks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: id, status: currentlyDone ? "not_started" : "done" }),
+    });
+  }
+
+  if (data.items.length === 0) {
+    return (
+      <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-400">
+        Nothing to show for &ldquo;{data.title}&rdquo;.
+      </div>
+    );
+  }
+
+  return (
+    <div className="not-prose mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {data.title}
+      </p>
+      <ul className="space-y-2">
+        {data.items.map((item) => {
+          const done = item.status === "done" || doneIds.has(item.id);
+          return (
+            <li
+              key={item.id}
+              className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2"
+            >
+              <input
+                type="checkbox"
+                checked={done}
+                onChange={() => toggleDone(item.id, done)}
+                className="h-4 w-4 accent-indigo-500"
+              />
+              <span className={`flex-1 text-sm text-slate-200 ${done ? "line-through opacity-50" : ""}`}>
+                {item.title}
+              </span>
+              {item.priority === "urgent" && !done && (
+                <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-medium text-red-300">
+                  Urgent
+                </span>
+              )}
+              {item.due && (
+                <span className="text-xs text-slate-500">{formatDateTime(item.due)}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function GeneratedCalendar({
+  data,
+}: {
+  data: Extract<ComponentPayload, { type: "calendar" }>["data"];
+}) {
+  if (data.events.length === 0) {
+    return (
+      <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-400">
+        Nothing scheduled for &ldquo;{data.title}&rdquo;.
+      </div>
+    );
+  }
+
+  return (
+    <div className="not-prose mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {data.title}
+      </p>
+      <ul className="space-y-2">
+        {data.events.map((event) => (
+          <li
+            key={event.id}
+            className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2"
+          >
+            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+              {event.type}
+            </span>
+            <span className="flex-1 text-sm text-slate-200">{event.title}</span>
+            <span className="text-xs text-slate-500">{formatDateTime(event.start)}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

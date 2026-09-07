@@ -84,6 +84,22 @@ export async function listActiveTasks(): Promise<TaskRecord[]> {
   return (data ?? []) as TaskRecord[];
 }
 
+/** Tasks/events with a due date inside [startIso, endIso], for the calendar component. */
+export async function getTasksInRange(startIso: string, endIso: string): Promise<TaskRecord[]> {
+  const { data, error } = await getSupabase()
+    .from("tasks_and_events")
+    .select("*")
+    .gte("due_at", startIso)
+    .lte("due_at", endIso)
+    .order("due_at", { ascending: true });
+
+  if (error) {
+    console.error("Failed to load tasks in range:", error);
+    return [];
+  }
+  return (data ?? []) as TaskRecord[];
+}
+
 export async function getTasksByIds(ids: string[]): Promise<TaskRecord[]> {
   if (ids.length === 0) return [];
   const { data, error } = await getSupabase()

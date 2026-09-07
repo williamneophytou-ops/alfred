@@ -20,7 +20,9 @@ function systemPrompt(): string {
     "anything actionable the user needs to do — a task, event, deadline, or reminder — whether or " +
     "not it has a specific date attached (leave the date out if there isn't one). Only use remember " +
     "for passive facts/preferences with nothing to act on. Resolve relative dates like 'next " +
-    "Thursday' or 'in three days' against today's date above."
+    "Thursday' or 'in three days' against today's date above. Use show_component when an actual " +
+    "task list or calendar view would genuinely help more than text (e.g. 'what's on today', " +
+    "'show my week') — reference real task ids, never invented ones."
   );
 }
 
@@ -39,9 +41,9 @@ export async function POST(req: NextRequest) {
       messages as IncomingMessage[]
     ).map((m) => ({ role: m.role, content: m.content }));
 
-    const reply = await runWithMemory(systemPrompt(), conversationMessages);
+    const { reply, component } = await runWithMemory(systemPrompt(), conversationMessages);
 
-    return NextResponse.json({ reply });
+    return NextResponse.json({ reply, component });
   } catch (error) {
     console.error(error);
     return NextResponse.json(

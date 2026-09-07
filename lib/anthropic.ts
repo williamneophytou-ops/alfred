@@ -1,6 +1,41 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { loadMemories, saveMemory, searchMemories } from "./memory";
-import { addTask, listActiveTasks, type NewTask } from "./tasks";
+import {
+  addTask,
+  listActiveTasks,
+  getTasksByIds,
+  getTasksInRange,
+  type NewTask,
+} from "./tasks";
+
+export type ComponentPayload =
+  | {
+      type: "task_list";
+      data: {
+        title: string;
+        items: {
+          id: string;
+          title: string;
+          due: string | null;
+          status: string;
+          priority: string;
+        }[];
+      };
+    }
+  | {
+      type: "calendar";
+      data: {
+        title: string;
+        range: { start: string; end: string };
+        events: {
+          id: string;
+          title: string;
+          start: string;
+          end: string | null;
+          type: string;
+        }[];
+      };
+    };
 
 export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -72,27 +107,115 @@ const tools: Anthropic.Tool[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "show_component",
+    description:
+      "Display an interactive visual view in the chat instead of (or alongside) plain text — a task list or a calendar/timeline. Use this when a visual genuinely helps (e.g. 'what's on my plate', 'show my week') — not for ordinary conversation. Reference real tasks by id (from recall/add_task results or the tracked-tasks list) rather than inventing details — the actual current title/due date/status is looked up server-side, so you can't get this wrong.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        component_type: { type: "string", enum: ["task_list", "calendar"] },
+        title: { type: "string", description: "Short heading for the view, e.g. 'This Week' or 'Overdue'." },
+        task_ids: {
+          type: ["array", "null"],
+          items: { type: "string" },
+          description: "For task_list: the real ids of tasks to show. Null/omit for calendar.",
+        },
+        range_start: {
+          type: ["string", "null"],
+          description: "For calendar: ISO date, start of the range. Null for task_list.",
+        },
+        range_end: {
+          type: ["string", "null"],
+          description: "For calendar: ISO date, end of the range. Null for task_list.",
+        },
+      },
+      required: ["component_type", "title", "task_ids", "range_start", "range_end"],
+      additionalProperties: false,
+    },
+  },
 ];
 
-async function executeTool(name: string, input: unknown, source: string): Promise<string> {
+type ToolExecutionResult = {
+  result: string;
+  component?: ComponentPayload;
+};
+
+async function executeTool(
+  name: string,
+  input: unknown,
+  source: string
+): Promise<ToolExecutionResult> {
   if (name === "remember") {
     const { content } = input as { content: string };
     const ok = await saveMemory(content);
-    return ok ? "Saved." : "Failed to save that.";
+    return { result: ok ? "Saved." : "Failed to save that." };
   }
   if (name === "recall") {
     const { query } = input as { query: string };
     const matches = await searchMemories(query);
-    return matches.length > 0
-      ? matches.map((m) => `- ${m}`).join("\n")
-      : "No matching memories found.";
+    return {
+      result:
+        matches.length > 0
+          ? matches.map((m) => `- ${m}`).join("\n")
+          : "No matching memories found.",
+    };
   }
   if (name === "add_task") {
     const task = input as NewTask;
-    const ok = await addTask({ ...task, source });
-    return ok ? "Task added." : "Failed to add that task.";
+    const taskId = await addTask({ ...task, source });
+    return { result: taskId ? "Task added." : "Failed to add that task." };
   }
-  return "Unknown tool.";
+  if (name === "show_component") {
+    const { component_type, title, task_ids, range_start, range_end } = input as {
+      component_type: "task_list" | "calendar";
+      title: string;
+      task_ids: string[] | null;
+      range_start: string | null;
+      range_end: string | null;
+    };
+
+    if (component_type === "task_list") {
+      const tasks = await getTasksByIds(task_ids ?? []);
+      const component: ComponentPayload = {
+        type: "task_list",
+        data: {
+          title,
+          items: tasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            due: t.due_at,
+            status: t.status,
+            priority: t.priority,
+          })),
+        },
+      };
+      return { result: "Shown to the user.", component };
+    }
+
+    if (component_type === "calendar" && range_start && range_end) {
+      const tasks = await getTasksInRange(range_start, range_end);
+      const component: ComponentPayload = {
+        type: "calendar",
+        data: {
+          title,
+          range: { start: range_start, end: range_end },
+          events: tasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            start: t.due_at as string,
+            end: null,
+            type: t.type,
+          })),
+        },
+      };
+      return { result: "Shown to the user.", component };
+    }
+
+    return { result: "Missing required fields for that component." };
+  }
+  return { result: "Unknown tool." };
 }
 
 const MAX_TOOL_ITERATIONS = 20;
@@ -109,22 +232,29 @@ type RunOptions = {
   taskSource?: string;
 };
 
+export type RunResult = {
+  reply: string;
+  component: ComponentPayload | null;
+};
+
 /**
- * Runs a message (or conversation) through Claude with the remember/recall
- * tools available, looping until Claude gives a final text reply. Used by
- * both the chat endpoint and the email sync endpoint.
+ * Runs a message (or conversation) through Claude with the remember/recall/
+ * add_task/show_component tools available, looping until Claude gives a
+ * final text reply. Used by both the chat endpoint and the email sync
+ * endpoint (which ignores the returned component — no UI there).
  */
 export async function runWithMemory(
   systemPrompt: string,
   initialMessages: Anthropic.MessageParam[],
   options: RunOptions = {}
-): Promise<string> {
+): Promise<RunResult> {
   const memoryContext = options.includeAllMemories
     ? await buildFullMemoryContext()
     : await buildLeanContext();
 
   const messages = [...initialMessages];
   let finalReply = "";
+  let finalComponent: ComponentPayload | null = null;
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await anthropic.messages.create({
@@ -168,7 +298,12 @@ export async function runWithMemory(
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const block of toolUseBlocks) {
-      const result = await executeTool(block.name, block.input, options.taskSource ?? "chat");
+      const { result, component } = await executeTool(
+        block.name,
+        block.input,
+        options.taskSource ?? "chat"
+      );
+      if (component) finalComponent = component;
       toolResults.push({
         type: "tool_result",
         tool_use_id: block.id,
@@ -179,7 +314,7 @@ export async function runWithMemory(
     messages.push({ role: "user", content: toolResults });
   }
 
-  return finalReply;
+  return { reply: finalReply, component: finalComponent };
 }
 
 /**
@@ -193,8 +328,10 @@ async function buildLeanContext(): Promise<string> {
   const tasks = await listActiveTasks();
   const taskPart =
     tasks.length > 0
-      ? `Currently tracked tasks/events (don't call add_task again for these — only for genuinely new items):\n${tasks
-          .map((t) => `- ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""}`)
+      ? `Currently tracked tasks/events — don't call add_task again for these, only for genuinely ` +
+        `new items. Each one's real id is given in brackets; use it (never invent one) if you call ` +
+        `show_component for a task_list:\n${tasks
+          .map((t) => `- [${t.id}] ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""}`)
           .join("\n")}`
       : "No tasks/events tracked yet.";
 
@@ -216,8 +353,9 @@ async function buildFullMemoryContext(): Promise<string> {
 
   const taskPart =
     tasks.length > 0
-      ? `Existing tasks/events already tracked (don't re-add these — call add_task only for genuinely new items):\n${tasks
-          .map((t) => `- ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""}`)
+      ? `Existing tasks/events already tracked (don't re-add these — call add_task only for genuinely ` +
+        `new items). Each one's real id is in brackets:\n${tasks
+          .map((t) => `- [${t.id}] ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""}`)
           .join("\n")}`
       : "No tasks/events tracked yet.";
 
