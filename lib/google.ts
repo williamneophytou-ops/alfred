@@ -18,6 +18,16 @@ export const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
 ];
 
+/** Whether a Google account is currently connected (a refresh token is on file). */
+export async function isGoogleConnected(): Promise<boolean> {
+  const { data } = await getSupabase()
+    .from("google_tokens")
+    .select("id")
+    .eq("id", "default")
+    .maybeSingle();
+  return !!data;
+}
+
 async function getAuthorizedClient() {
   const { data, error } = await getSupabase()
     .from("google_tokens")

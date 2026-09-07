@@ -273,9 +273,6 @@ function Header({
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-cyan-400/20 bg-black/40 px-5 py-4 backdrop-blur-2xl md:px-8">
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-600 text-sm font-semibold text-black shadow-[0_0_12px_rgba(34,211,238,0.5)]">
-          A
-        </div>
         <div>
           <div className="font-display text-base font-semibold leading-tight tracking-wide text-white">
             ALFRED
@@ -310,12 +307,48 @@ function Header({
   );
 }
 
+function MailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3 7 9 6 9-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function MemorySection({ gmailStatus }: { gmailStatus: string | null }) {
   const section = SECTIONS.find((s) => s.id === "memory")!;
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  // Whether a Google account is actually connected right now, checked against
+  // the server (not just the one-off ?gmail=connected redirect flag, which
+  // disappears on refresh). null while that check is still in flight.
+  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/google/status")
+      .then((res) => res.json())
+      .then((data) => setGoogleConnected(!!data.connected))
+      .catch(() => setGoogleConnected(false));
+  }, []);
+
+  useEffect(() => {
+    if (gmailStatus === "connected") setGoogleConnected(true);
+  }, [gmailStatus]);
 
   async function sync() {
+    if (!window.confirm("Sync email now? Alfred will scan your recent inbox for new tasks and deadlines.")) {
+      return;
+    }
     setSyncing(true);
     setSyncResult(null);
     try {
@@ -364,16 +397,24 @@ function MemorySection({ gmailStatus }: { gmailStatus: string | null }) {
             </p>
           )}
 
-          <div className="mt-2 flex flex-wrap justify-center gap-2">
-            <a
-              href="/api/auth/google"
-              className={`rounded-full px-5 py-2 text-sm font-medium text-white ${ACCENT}`}
-            >
-              Connect Gmail &amp; Calendar
-            </a>
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+            {googleConnected === true && gmailStatus !== "no_refresh_token" ? (
+              <span className="flex items-center gap-2 rounded-full bg-emerald-500/15 px-4 py-2 text-sm font-medium text-emerald-300">
+                <MailIcon />
+                <CalendarIcon />
+                Connected
+              </span>
+            ) : googleConnected === false || gmailStatus === "no_refresh_token" ? (
+              <a
+                href="/api/auth/google"
+                className={`rounded-full px-5 py-2 text-sm font-medium text-white ${ACCENT}`}
+              >
+                Connect Gmail &amp; Calendar
+              </a>
+            ) : null}
             <button
               onClick={sync}
-              disabled={syncing}
+              disabled={syncing || googleConnected !== true}
               className="rounded-full border border-cyan-400/20 px-5 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               {syncing ? "Syncing..." : "Sync Email (last 30 days)"}

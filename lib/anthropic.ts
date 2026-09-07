@@ -8,6 +8,7 @@ import {
   type NewTask,
 } from "./tasks";
 import { listCalendarEvents, createCalendarEvent } from "./calendar";
+import { findOrCreatePerson, findPersonByName, addPersonNote, getPersonNotes } from "./people";
 
 export type ComponentPayload =
   | {
@@ -142,6 +143,46 @@ const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: "remember_about_person",
+    description:
+      "Save a fact or note about a specific person — something they told you, something you talked " +
+      "about with them, something that happened involving them. This builds an ongoing file per " +
+      "person so their whole history can be recalled later, not just the current conversation. Use " +
+      "plain `remember` instead for general facts that aren't tied to one specific person.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "The person's name, as the user refers to them (e.g. 'Sarah', 'Dan from work').",
+        },
+        fact: {
+          type: "string",
+          description: "The note to save, written as a short self-contained sentence.",
+        },
+      },
+      required: ["name", "fact"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "recall_person",
+    description:
+      "Look up everything on file for a specific person by name — every note saved about them from " +
+      "past conversations and emails. Use this whenever the user asks about someone by name, or " +
+      "knowing their history would help you respond.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The person's name to look up." },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "show_component",
     description:
       "Display an interactive visual view in the chat instead of (or alongside) plain text — a task list or a calendar/timeline. Use this when a visual genuinely helps (e.g. 'what's on my plate', 'show my week') — not for ordinary conversation. Reference real tasks by id (from recall/add_task results or the tracked-tasks list) rather than inventing details — the actual current title/due date/status is looked up server-side, so you can't get this wrong.",
@@ -241,6 +282,25 @@ async function executeTool(
       const message = err instanceof Error ? err.message : "Failed to create the event.";
       return { result: message };
     }
+  }
+  if (name === "remember_about_person") {
+    const { name: personName, fact } = input as { name: string; fact: string };
+    const person = await findOrCreatePerson(personName);
+    if (!person) return { result: "Failed to save that." };
+    const ok = await addPersonNote(person.id, fact, source);
+    return { result: ok ? `Saved to ${person.name}'s file.` : "Failed to save that." };
+  }
+  if (name === "recall_person") {
+    const { name: personName } = input as { name: string };
+    const person = await findPersonByName(personName);
+    if (!person) return { result: `No file found for ${personName}.` };
+    const notes = await getPersonNotes(person.id);
+    return {
+      result:
+        notes.length > 0
+          ? `${person.name}:\n${notes.map((n) => `- ${n.content}`).join("\n")}`
+          : `${person.name} has a file, but nothing saved yet.`,
+    };
   }
   if (name === "show_component") {
     const { component_type, title, task_ids, range_start, range_end } = input as {

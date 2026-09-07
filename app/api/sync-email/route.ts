@@ -17,7 +17,9 @@ function systemPrompt(): string {
     "anything with nothing to act on or remember. PDF and image attachments are read separately and " +
     "any tasks found in them are added automatically, so don't guess at their contents — just work " +
     "from the visible subject/body. For other attachment types (not PDF/image), flag in your summary " +
-    "if the email looks important and has one you can't see. After reviewing, reply with a short " +
+    "if the email looks important and has one you can't see. If an email is from, or is clearly " +
+    "about, a specific person and contains something worth remembering about them individually, " +
+    "call remember_about_person too, alongside add_task/remember as usual. After reviewing, reply with a short " +
     'plain-English summary of what you found (a few bullet points), or say "Nothing new to ' +
     'remember" if nothing qualified. Do not ask questions — just report.'
   );

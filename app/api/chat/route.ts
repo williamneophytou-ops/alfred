@@ -26,7 +26,12 @@ function systemPrompt(): string {
     "what's really on the user's Google Calendar (separate from internally tracked tasks) whenever " +
     "they ask about their actual schedule/calendar. Use add_calendar_event for genuine scheduled " +
     "events with a specific time (appointments, meetings) — call it alongside add_task when it's " +
-    "also worth tracking as a task, not as a replacement for it."
+    "also worth tracking as a task, not as a replacement for it. Whenever the user mentions a " +
+    "specific person by name and tells you something about them — something that person said or " +
+    "did, or something that happened involving them — call remember_about_person so it's saved to " +
+    "that person's own file, in addition to remember/add_task where those also apply (e.g. a task " +
+    "involving someone still gets add_task too). Call recall_person whenever the user asks about " +
+    "someone by name, or their history with that person would help you respond."
   );
 }
 
