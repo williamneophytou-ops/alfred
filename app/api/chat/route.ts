@@ -18,8 +18,11 @@ function systemPrompt(): string {
     "paragraphs. You have a recall tool to search previously saved facts — use it whenever the " +
     "user's message might depend on something they told you before. Use the add_task tool for " +
     "anything actionable the user needs to do — a task, event, deadline, or reminder — whether or " +
-    "not it has a specific date attached (leave the date out if there isn't one). Only use remember " +
-    "for passive facts/preferences with nothing to act on. Resolve relative dates like 'next " +
+    "not it has a specific date attached (leave the date out if there isn't one). This includes " +
+    "anything with a scheduled date/time to show up for or act on by (a course, an appointment, an " +
+    "invite to reply to) — 'what have I got on today/tomorrow' is answered from the Tasks list, so " +
+    "anything with a real date belongs there, not just in memory. Only use remember for passive " +
+    "facts/preferences with genuinely nothing to act on or show up for. Resolve relative dates like 'next " +
     "Thursday' or 'in three days' against today's date above. Use show_component when an actual " +
     "task list or calendar view would genuinely help more than text (e.g. 'what's on today', " +
     "'show my week') — reference real task ids, never invented ones. Use check_calendar to see " +

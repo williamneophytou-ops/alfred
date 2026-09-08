@@ -11,8 +11,14 @@ function systemPrompt(): string {
     "recent emails. Call add_task for anything actionable the user needs to do — deadlines, " +
     "appointments, deliveries, event dates, bookings, or a plain action item with no date at all " +
     "(e.g. 'reply to this', 'send your student ID to reset MFA') — leave the date out if there " +
-    "isn't one; it still belongs in the Tasks list, not just memory. Only use remember for passive " +
-    "facts/preferences with nothing to act on. Skip anything already in the known facts or existing " +
+    "isn't one; it still belongs in the Tasks list, not just memory. This includes anything with a " +
+    "scheduled date/time the user needs to show up for or act on by — a course, an appointment, an " +
+    "invite to reply to, a form to complete — call add_task for these even if the email also reads " +
+    "like a simple notification; 'what have I got on today/tomorrow' is answered from the Tasks " +
+    "list, so anything with a real date belongs there, not just in memory. Only use remember for " +
+    "passive facts/preferences with genuinely nothing to act on or show up for (e.g. 'my favorite " +
+    "team is Arsenal', 'my accommodation email address changed'). Skip anything already in the " +
+    "known facts or existing " +
     "tasks listed below so you don't create duplicates. Ignore promotional emails, newsletters, and " +
     "anything with nothing to act on or remember. PDF and image attachments are read separately and " +
     "any tasks found in them are added automatically, so don't guess at their contents — just work " +
